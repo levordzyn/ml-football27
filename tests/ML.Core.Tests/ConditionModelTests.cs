@@ -54,33 +54,37 @@ public class ConditionModelTests
     }
 
     [Fact]
-    public void InjuryRateIsRoughlyTwoPercent()
+    public void InjuryRateIsRoughlyFourAndAHalfPercent()
     {
         var injuries = 0;
         for (var pid = 1; pid <= 10000; pid++)
             if (ConditionModel.InjuryRoll(1, 1, pid) is not null) injuries++;
 
-        Assert.InRange(injuries, 100, 400);                      // 1%..4% of 10,000 rolls
+        Assert.InRange(injuries, 350, 550);                      // 3.5%..5.5% of 10,000 rolls
     }
 
     [Fact]
-    public void InjuriesLastOneToFourMatchdays()
+    public void MostInjuriesAreShortAndAFewKeepAPlayerOutForMonths()
     {
         const int matchday = 12;
-        for (var pid = 1; pid <= 10000; pid++)
-        {
-            var outUntil = ConditionModel.InjuryRoll(2, matchday, pid);
-            if (outUntil is not null)
-                Assert.InRange(outUntil.Value, matchday + 1, matchday + 4);
-        }
+        var lengths = new List<int>();
+        for (var pid = 1; pid <= 40000; pid++)
+            if (ConditionModel.InjuryRoll(2, matchday, pid) is { } outUntil)
+                lengths.Add(outUntil - matchday);
+
+        Assert.All(lengths, l => Assert.InRange(l, 1, 33));
+        Assert.InRange(lengths.Count(l => l == 1) / (double)lengths.Count, 0.35, 0.45);   // a week or less
+        Assert.InRange(lengths.Count(l => l >= 4) / (double)lengths.Count, 0.20, 0.30);   // a month or more
+        Assert.Contains(lengths, l => l >= 24);                                           // season-ending
+        Assert.InRange(lengths.Average(), 2.9, 3.7);
     }
 
     [Fact]
     public void DifferentMatchdaysRollIndependently()
     {
         // A roll must not be a function of the player id alone: a squad that dodges every knock
-        // on matchday 1 (200 pids at ~2% could) must still pick some up across a 38-matchday
-        // season — ~150 expected over the 7,600 rolls.
+        // on matchday 1 (200 pids at ~4.5% could) must still pick some up across a 38-matchday
+        // season — ~340 expected over the 7,600 rolls.
         var anyInjuredAcrossSeason = Enumerable.Range(1, 200).Any(pid =>
             Enumerable.Range(1, 38).Any(md => ConditionModel.InjuryRoll(1, md, pid) is not null));
 

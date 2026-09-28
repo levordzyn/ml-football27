@@ -50,17 +50,42 @@ public static class ConditionModel
         InjuryRoll(seasonId, matchday, playerId, 1.0);
 
     /// <summary>
-    /// Injury roll scaled by <paramref name="proneness"/> (a multiplier on the ~2% base: eFootball's
-    /// Injury Resistance inverted — robust ~0.5, fragile ~1.6). Glass players pick up knocks two to
-    /// three times as often as iron men. Still fully deterministic in (season, matchday, player).
+    /// Chance of a knock per start, in ten-thousandths, before proneness. Professional match
+    /// play runs at about 4% per player per 90 minutes, and the model has no training-ground
+    /// injuries, so this sits just above that.
+    /// </summary>
+    public const double BaseInjuryChance = 450.0;
+
+    /// <summary>
+    /// Injury roll scaled by <paramref name="proneness"/> (a multiplier on the ~4.5% base:
+    /// eFootball's Injury Resistance inverted — robust ~0.5, fragile ~1.6). Glass players pick
+    /// up knocks two to three times as often as iron men. Still fully deterministic in
+    /// (season, matchday, player).
     /// </summary>
     public static int? InjuryRoll(int seasonId, int matchday, long playerId, double proneness)
     {
         var h = Mix(seasonId, matchday, playerId);
-        var threshold = (uint)Math.Clamp(200.0 * proneness, 0.0, 9999.0);
+        var threshold = (uint)Math.Clamp(BaseInjuryChance * proneness, 0.0, 9999.0);
         if ((uint)(h >> 32) % 10000 >= threshold) return null;
-        var duration = 1 + (int)((uint)h % 4);
-        return matchday + duration;
+        return matchday + InjuryLength((uint)h);
+    }
+
+    /// <summary>
+    /// Matchdays missed. Most knocks are a week or less, a fifth keep a player out a month or
+    /// more, and one in a hundred ends his season: 40% one matchday, 35% two or three, 17% four
+    /// to seven, 7% eight to fifteen, 1% twenty-four to thirty-three. Mean about 3.3.
+    /// </summary>
+    private static int InjuryLength(uint bits)
+    {
+        var spread = bits / 100;
+        return (bits % 100) switch
+        {
+            < 40 => 1,
+            < 75 => 2 + (int)(spread % 2),
+            < 92 => 4 + (int)(spread % 4),
+            < 99 => 8 + (int)(spread % 8),
+            _ => 24 + (int)(spread % 10),
+        };
     }
 
     /// <summary>SplitMix64 over the three inputs — full-avalanche, no Random, no shared state.</summary>
