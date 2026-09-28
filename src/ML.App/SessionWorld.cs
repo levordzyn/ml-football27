@@ -2094,7 +2094,7 @@ public sealed partial class Session
                 Repo.Fixtures(SeasonId, matchday).Where(f => f.Kind == "cup").ToList(),
                 weekAlreadyRun: GetMeta($"cond_applied_{SeasonId}_{matchday}") is not null);
         }
-        catch { /* the weekly pass never blocks recording */ }
+        catch (Exception ex) { Program.Log("Session.UpdateConditionsAfterCup/RunWeeklyEconomy", ex); }
         SetMeta(guard, "1");
     }
 
