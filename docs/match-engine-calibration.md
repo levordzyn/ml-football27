@@ -47,43 +47,68 @@ Matched formations both sides (4-4-2 v 4-4-2), 75 overall each, 400 simulated ma
 
 | Metric | Engine | Real football | Gap |
 |---|---|---|---|
-| Home / Draw / Away | 40% / 19% / 41% | ~45% / 25% / 30% | draws low, otherwise close |
-| Goals per match (combined) | 4.3 | ~2.7 | **~60% too high** |
-| Shots per team | 16.6 | ~12–14 | ~20% too high |
-| xG per shot (mean) | 0.15 | ~0.10–0.12 | somewhat high |
-| Fouls per match (combined) | 20.6 | ~22 | close |
-| Yellow cards (combined) | 1.7 | ~3.5 | low |
-| Red cards (combined) | 0.18 | ~0.06 | **~3x too high** |
-| Corners (combined) | 8.1 | ~10 | close |
-| Passes per team | ~365 | ~400–550 | slightly low |
+| Home / Draw / Away | 33% / 27% / 40% | ~45% / 25% / 30% | draw rate good; away runs a bit hot, home a bit cold with 4-4-2 on both sides (see below) |
+| Goals per match (combined) | 3.10 | ~2.7 | close |
+| Shots per team | 16.4 | ~12–14 | ~20% high |
+| xG per shot (mean) | ~0.10 | ~0.10–0.12 | good |
+| Fouls per match (combined) | 20.5 | ~22 | close |
+| Yellow cards (combined) | 3.10 | ~3.5 | close |
+| Red cards (combined) | 0.10 | ~0.06 | close |
+| Corners (combined) | 8.9 | ~10 | close |
+| Passes per team | ~418 | ~400–550 | good |
 | Possession split | ~50/50 | ~50/50 | good |
 
-A strength-gap test (85 vs 65 overall, same formation) gives the stronger side an 87–96%
-win rate. That's too deterministic — real upsets at that gap are rarer than even, not
-essentially never.
+A strength-gap sweep (same formation both sides, 75 overall baseline):
 
-## Why goals and reds are still off, and what would fix them
+| Gap | Stronger side win rate |
+|---|---|
+| 0 (equal) | ~33–40% each way (draws ~27%) |
+| 6 points | ~50–58% |
+| 10 points | ~65–66% |
+| 20 points | ~90% |
 
-- **Goals too high:** shots are in the right range, so this is conversion, not shot volume.
-  `ShotQuality.BaseXg`'s damping constant (0.24) and the in-box shot-trigger probability in
-  `MatchEngine.ChooseAction` both need another downward pass — I made three successive cuts
-  during this session and ran out of budget before landing in range. A ~15–20% further cut
-  to both should get combined goals under 3.5.
-- **Reds too high:** fouls concentrate on whichever defender happens to be nearest the ball
-  when a turnover fires, so the same player can pick up two yellows more often than real
-  football's foul distribution would produce. The yellow-card probability is already tuned
-  down to compensate, which is why yellows are now *under* target. A structural fix (the
-  AI manager keeping a booked player away from last-ditch challenges, or spreading
-  defensive duty more evenly) would let both numbers hit target at once.
-- **Strength-gap too deterministic:** this is the classic many-small-decisions-compound-to-
-  certainty effect of a high-tick-count simulation. `MatchEngine.FailChance`'s attribute
-  divisor (420) already got one increase during this session; it likely needs another, or a
-  injected noise term independent of attributes, to preserve match-to-match variance at a
-  given attribute gap.
+This now reads as a believable curve — a 6-point edge helps but doesn't dominate, a
+20-point gap (a genuinely one-sided fixture) wins the vast majority without being a
+mathematical certainty (`HigherOverallTeamWinsMoreOftenButNotEveryTime` holds at ~86% in
+the committed test run, never 100%).
 
-None of these are structural problems — they're constants that need more of the batch-and-
-retune cycle this file documents. That's exactly what the project's own Phase 11
-("Calibration": thousands of matches, batch testing, tune, regression-test) is for.
+**One residual oddity:** with 4-4-2 on both sides, Away's win share runs a few points above
+Home's even though the engine is confirmed side-symmetric (`SideDoesNotSystematically
+DetermineTheWinnerWhenTeamsAreEqual` passes comfortably, 30–65% band, typically ~35–45%).
+This looks like formation-specific noise in how 4-4-2's specific coordinates interact with
+the current pass/turnover model rather than a Home/Away bug — worth a follow-up isolation
+test the same way the original Home-bug was caught (both sides same formation, vary which
+side plays which formation, across more seeds) before trusting it fully.
+
+## What changed in this calibration pass
+
+Three more real issues, not just constants, surfaced while chasing the numbers above:
+
+- **Red cards spiraled when yellow-card frequency went up.** Raising the base yellow
+  probability to hit the 3.5-combined target initially pushed reds to 5x target, because
+  fouls concentrate on whichever defender is nearest the ball when a turnover fires — the
+  same player could rack up a second yellow far more than real foul distribution supports.
+  Fixed with real football logic, not a fudge: a player already on a yellow now fouls far
+  less often on the next last-ditch challenge (he's visibly more careful), which is
+  specifically what keeps a single booked defender from stacking two cards. That's in
+  `MatchEngine.ResolveTurnover`, not a global red-card suppressor.
+- **Goals ran ~60% hot.** `ShotQuality.BaseXg`'s damping constant and the in-box
+  shot-trigger probability both needed roughly another 25–30% cut beyond the previous
+  pass's numbers to land mean shot xG near 0.10.
+- **Strength-gap determinism** needed a further widened attribute divisor in
+  `MatchEngine.FailChance` (600, up from 420) to stop many small per-action attribute edges
+  compounding into near-certainty over a full match.
+
+## What's still worth another pass
+
+- **Shots/team (~16) still runs ~20% above the 12–14 real-football range.** Goals and xG
+  are now well calibrated *given* this shot volume, so cutting shots further would need a
+  matching reduction elsewhere to avoid re-dropping goals below target — a paired tweak,
+  not a one-line fix.
+- **The Away-leaning split under matched 4-4-2** flagged above.
+- Everything else — fouls, cards, corners, passes, possession, the strength-gap curve — is
+  now close enough that further tuning should happen against real `dotnet test` runs and
+  larger batches (the project's own Phase 11 scope), not single-session guesswork.
 
 ## What's deliberately simplified in this slice
 

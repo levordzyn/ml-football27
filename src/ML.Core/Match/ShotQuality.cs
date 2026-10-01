@@ -37,6 +37,6 @@ public static class ShotQuality
 
         // Damping factor: every modelled shot already cleared "is this worth shooting?", so the
         // raw geometric estimate over-represents clean, unpressured efforts.
-        return Math.Clamp(xg * 0.24, 0.01, 0.85);
+        return Math.Clamp(xg * 0.17, 0.01, 0.85);
     }
 }

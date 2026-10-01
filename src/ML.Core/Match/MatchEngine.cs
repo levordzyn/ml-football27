@@ -177,7 +177,7 @@ public sealed class MatchEngine
                 RunAction(actor, action, possessing, defending, progress);
         }
 
-        AdvanceClock(2 + _flow.Next(5)); // 2..6s per action
+        AdvanceClock(2 + _flow.Next(4)); // 2..5s per action
         AccumulateFatigue(second, _state.Second);
         CheckHalfBoundaries();
     }
@@ -197,7 +197,7 @@ public sealed class MatchEngine
             Action.ThroughBall => 0.34,
             _ => 0.15,
         };
-        var attributeShift = (pressure - quality) / 420.0;
+        var attributeShift = (pressure - quality) / 600.0;
         var pressingShift = (defTactics.Pressing - 0.5) * 0.10;
         return Math.Clamp(baseline + attributeShift + pressingShift, 0.04, 0.62);
     }
@@ -294,8 +294,11 @@ public sealed class MatchEngine
             .OrderBy(p => Sq(p.X - actor.X) + Sq(p.Y - actor.Y)).First();
 
         // A mistimed challenge is more likely the deeper and more dangerous the situation, but
-        // even a last-ditch tackle is clean far more often than not.
-        var desperation = Math.Clamp(0.05 + 0.16 * Math.Max(0, progress - 0.55), 0.05, 0.22);
+        // even a last-ditch tackle is clean far more often than not. A player already on a
+        // yellow holds back from the next one, which is also what keeps fouls from piling up
+        // onto a single booked defender.
+        var desperation = Math.Clamp(0.05 + 0.16 * Math.Max(0, progress - 0.55), 0.05, 0.22)
+            * (defender.YellowCards >= 1 ? 0.12 : 1.0);
         if (_flow.Chance(desperation))
         {
             var evId = Log(EventKind.Foul, defending.Side, _spellSide, defender.Player.Id, actor.Player.Id, actor.X, actor.Y,
@@ -328,7 +331,7 @@ public sealed class MatchEngine
             return;
         }
 
-        if (!_flow.Chance(denyingCleanChance ? 0.15 : 0.065)) return;
+        if (!_flow.Chance(denyingCleanChance ? 0.24 : 0.13)) return;
 
         defender.YellowCards++;
         Log(EventKind.YellowCard, side, side, defender.Player.Id, 0, defender.X, defender.Y, causeId: -1);
@@ -346,7 +349,7 @@ public sealed class MatchEngine
         var wide = y < 0.22 || y > 0.78;
         var inBox = progress > 0.87 && Math.Abs(y - 0.5) < 0.25;
 
-        if (inBox && actor.Effective(actor.Player.Shooting) > 40 && _flow.Chance(0.22 + tactics.Risk * 0.18))
+        if (inBox && actor.Effective(actor.Player.Shooting) > 40 && _flow.Chance(0.17 + tactics.Risk * 0.14))
             return Action.Shot;
 
         var weights = new (Action a, double w)[]
