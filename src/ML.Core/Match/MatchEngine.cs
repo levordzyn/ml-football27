@@ -308,11 +308,15 @@ public sealed class MatchEngine
             MaybeCard(defender, defending.Side, denyingCleanChance: progress > 0.80);
 
             var isPenalty = progress > 0.85 && Math.Abs(_spellY - 0.5) < 0.28;
-            Log(isPenalty ? EventKind.Penalty : EventKind.FreeKick, _spellSide, _spellSide,
+            var restartId = Log(isPenalty ? EventKind.Penalty : EventKind.FreeKick, _spellSide, _spellSide,
                 actor.Player.Id, 0, actor.X, actor.Y, causeId: evId);
 
-            if (isPenalty) TakeShot(actor, _state.Of(_spellSide), defending, oneOnOne: true, buildupCauseId: evId);
-            else StartSpell(_spellSide, actor.X, actor.Y, evId);
+            // buildupCauseId is the Penalty/FreeKick event's own id, not the Foul's — that's what
+            // lets AssistKindFor resolve to Penalty/FreeKick and the xG model's set-piece
+            // multiplier actually apply, and what a Goal's two-hop assist lookup expects to chain
+            // through.
+            if (isPenalty) TakeShot(actor, _state.Of(_spellSide), defending, oneOnOne: true, buildupCauseId: restartId);
+            else TakeFreeKick(_state.Of(_spellSide), defending, actor.X, actor.Y, progress, restartId);
             return;
         }
 
@@ -351,7 +355,7 @@ public sealed class MatchEngine
         var inBox = progress > 0.87 && Math.Abs(y - 0.5) < 0.25;
 
         if (inBox && actor.Effective(actor.Player.Shooting) > 40
-            && _flow.Chance(0.17 + tactics.Risk * 0.14 + InstructionProfiles.Get(actor.Instruction).ShotBias))
+            && _flow.Chance(0.13 + tactics.Risk * 0.11 + InstructionProfiles.Get(actor.Instruction).ShotBias))
             return Action.Shot;
 
         var weights = new (Action a, double w)[]
@@ -504,10 +508,66 @@ public sealed class MatchEngine
         }
         else if ((result == ShotResult.OffTarget && _flow.Chance(0.4)) || (result == ShotResult.Blocked && _flow.Chance(0.5)))
         {
-            Log(EventKind.Corner, shooter.Side, defending.Side, 0, 0, causeId: shotId);
+            var cornerId = Log(EventKind.Corner, shooter.Side, defending.Side, 0, 0, causeId: shotId);
+            TakeCorner(attacking, defending, cornerId);
+            return;
         }
 
         StartSpell(defending.Side, defending.Side == Side.Home ? 0.06 : 0.94, 0.5, shotId);
+    }
+
+    /// <summary>
+    /// A corner is a chance for the side that won it, not a handover to the defence. The best
+    /// deliverer on the attacking team puts it in; most of the time a crowded box means it's
+    /// cleared before anyone gets a real sight of goal, but when it isn't, the best aerial
+    /// presence available gets a header at it.
+    /// </summary>
+    private void TakeCorner(TeamMatchState attacking, TeamMatchState defending, int causeId)
+    {
+        var deliverer = attacking.OnPitch.Where(p => p.OnPitch && !p.Player.Position.IsGoalkeeper())
+            .OrderByDescending(p => p.Effective(p.Player.Passing)).First();
+        if (!_flow.Chance(0.60 + deliverer.Effective(deliverer.Player.Passing) / 500.0))
+        {
+            // Cleared before it ever became a real chance.
+            StartSpell(defending.Side, defending.Side == Side.Home ? 0.06 : 0.94, 0.5, causeId);
+            return;
+        }
+
+        var target = attacking.OnPitch.Where(p => p.OnPitch && !p.Player.Position.IsGoalkeeper())
+            .OrderByDescending(p => p.Effective(p.Player.Physical)).First();
+        var attackFrameTarget = AttackFrameX(attacking.Side, 0.95);
+        target.X = attackFrameTarget;
+        target.Y = AttackFrameY(attacking.Side, 0.5 + (_flow.NextDouble() - 0.5) * 0.3);
+
+        // A packed box, not a precisely tracked one — three defenders between ball and goal is a
+        // reasonable stand-in for how crowded a defended corner actually is.
+        TakeShot(target, attacking, defending, oneOnOne: false, buildupCauseId: causeId, defendersBetween: 3);
+    }
+
+    /// <summary>
+    /// A foul given in shooting range doesn't always go direct — most of the time the award just
+    /// restarts open play from that spot. When it does go direct, the taker is whoever on the
+    /// pitch blends shooting and passing (technique) best, and he faces an assembled wall on top
+    /// of whatever defenders were already back.
+    /// </summary>
+    private void TakeFreeKick(TeamMatchState attacking, TeamMatchState defending, double x, double y, double progress, int causeId)
+    {
+        var inRange = progress > 0.68 && Math.Abs(AttackFrameY(attacking.Side, y) - 0.5) < 0.35;
+        if (!inRange || !_flow.Chance(0.35))
+        {
+            StartSpell(attacking.Side, x, y, causeId);
+            return;
+        }
+
+        var taker = attacking.OnPitch.Where(p => p.OnPitch && !p.Player.Position.IsGoalkeeper())
+            .OrderByDescending(p => p.Effective(p.Player.Shooting) * 0.6 + p.Effective(p.Player.Passing) * 0.4)
+            .First();
+        taker.X = x;
+        taker.Y = y;
+
+        var defendersAlreadyBack = defending.OnPitch.Count(p => p.OnPitch && AttackFrameX(attacking.Side, p.X) > progress);
+        var wallDefenders = Math.Clamp(defendersAlreadyBack + 3, 3, 7);   // +3 for the wall assembled specifically for the kick
+        TakeShot(taker, attacking, defending, oneOnOne: false, buildupCauseId: causeId, defendersBetween: wallDefenders);
     }
 
     private void AccumulateFatigue(int fromSecond, int toSecond)

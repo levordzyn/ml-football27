@@ -156,10 +156,42 @@ is a true no-op for Default), and a regression test
 full rerun of the Phase 2/3 calibration battery confirmed bit-for-bit identical results. None
 of the calibration numbers above changed because of this phase.
 
-**Not yet done:** opponent-tactics-aware adjustments are shallow (only `DefensiveMidfielder`
-and `Fullback` read the opponent's tactics at all); no explicit set-piece-specific instruction
-handling; CB and GK have no instruction axis yet, matching the spec's listed catalogue (it
-doesn't define one for those positions either).
+**Update — opponent-awareness and set pieces deepened in a follow-up pass:**
+
+- **All six position-group assigners now read the opponent's tactics**, not just two. A
+  pace-runner winger gets `AttackSpace` against an attacking or high-line opponent instead of
+  `TrackBack`; a central midfielder holds position against a team pressing high or committing
+  men forward even if he's good enough to roam; a lone striker gets `TargetMan`/`FalseNine`
+  against a deep block (no space to run into) or `AdvancedForward` against a high line (space to
+  attack); two strikers split roles by pace, with a high line nudging the slower partner toward
+  `AttackChannel` too if he has the pace for it.
+- **Corners and direct free kicks are now real chances for the attacking side**, not a silent
+  handover to the defence. Before this fix, a `Corner`/`FreeKick` event was logged for stats and
+  possession unconditionally went to the defending team — neither ever produced a shot. Now:
+  `TakeCorner` picks the best deliverer (by Passing) and the best aerial presence (by Physical,
+  capturing CBs and strikers alike coming up for it), with a delivery-success roll first (most
+  corners get cleared before a real chance, matching real football) and a fixed defenders-between
+  count of 3 reflecting a packed box. `TakeFreeKick` only goes direct for fouls won in range
+  (progress > 0.68, central-ish) and only 35% of the time even then — taken by whoever blends
+  Shooting and Passing best, facing the defenders already back plus a +3 wall.
+- **Found and fixed a real pre-existing bug while building this:** a free-kick or penalty shot's
+  `CauseId` was wired to the *Foul* event, not the Penalty/FreeKick restart event itself — so
+  the xG model's set-piece multiplier (`AssistKindFor`, which reads the cause event's `Kind`)
+  never actually applied to either shot type, silently, since Phase 2/3. Fixed by capturing the
+  restart event's own id and threading that through instead.
+- **Recalibrated for the new goal source:** set-piece goals weren't in the match at all before,
+  so letting them through pushed goals/match up (expected — corners and free kicks are a real
+  share of real goals). `ShotQuality`'s damping constant and the in-box shot-trigger probability
+  both came down slightly to bring the total back to ~2.8 combined, in range again.
+- **Known trade-off:** shots/team moved further from the 12–14 real-football range (now ~19,
+  versus ~16 before) because corner and free-kick shots are legitimately counted now where they
+  weren't before. Real football's 12–14 figure already includes set-piece shots, so this is the
+  existing open-play shot-volume gap compounding with the new (correct) set-piece shots, not a
+  new problem on its own. The next calibration pass should treat total shot volume — open play
+  plus set pieces together — as the one number to tune, rather than the two separately.
+- **Still shallow:** no genuine near-post/far-post corner routine (one fixed delivery point);
+  no designated/persistent set-piece taker (picked fresh by attribute each time rather than a
+  saved role); CB and GK still have no instruction axis, matching the spec's own catalogue.
 
 ## Running it yourself
 

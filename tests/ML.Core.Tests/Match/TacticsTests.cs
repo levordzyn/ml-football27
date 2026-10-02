@@ -98,6 +98,32 @@ public class AutoInstructionsTests
     }
 
     [Fact]
+    public void PaceRunnerWingerGetsAttackSpaceAgainstAnAttackingOpponent()
+    {
+        var starters = StartersFor(Formations.F442);
+        var rmfIdx = Formations.F442.Slots.ToList().FindIndex(s => s.Position == Position.RMF);
+        starters[rmfIdx] = starters[rmfIdx] with { Pace = 90, Dribbling = 65 };
+
+        var ins = AutoInstructions.Assign(starters, Formations.F442, new MatchTactics(), new MatchTactics { Mentality = Mentality.VeryAttacking });
+
+        Assert.Equal(PlayerInstruction.AttackSpace, ins[starters[rmfIdx].Id]);
+    }
+
+    [Fact]
+    public void PhysicalStrikerGetsTargetManAgainstADeepBlockWhilePaceyPartnerGetsAttackChannel()
+    {
+        var starters = StartersFor(Formations.F442);
+        var cfSlots = Formations.F442.Slots.Select((s, i) => (s, i)).Where(t => t.s.Position == Position.CF).ToList();
+        starters[cfSlots[0].i] = starters[cfSlots[0].i] with { Physical = 80, Pace = 55 };
+        starters[cfSlots[1].i] = starters[cfSlots[1].i] with { Physical = 60, Pace = 85 };
+
+        var ins = AutoInstructions.Assign(starters, Formations.F442, new MatchTactics(), new MatchTactics { DefensiveLine = 0.2 });
+
+        Assert.Equal(PlayerInstruction.TargetMan, ins[starters[cfSlots[0].i].Id]);
+        Assert.Equal(PlayerInstruction.AttackChannel, ins[starters[cfSlots[1].i].Id]);
+    }
+
+    [Fact]
     public void NeverAssignsAWingerInstructionToAFullback()
     {
         // Each position only ever gets instructions from its own catalogue (Section 8's intent):
@@ -204,5 +230,77 @@ public class InstructionBehaviorTests
 
         Assert.True(advancedForward.touches < targetMan.touches);
         Assert.True((double)advancedForward.shots / advancedForward.touches > (double)targetMan.shots / targetMan.touches);
+    }
+}
+
+public class SetPieceTests
+{
+    private static TeamSheet MakeTeam(string name, int startId, int overall, Formation f) =>
+        new(name, f,
+            new MatchTactics(),
+            f.Slots.Select((s, i) => MatchPlayer.FromOverall(startId + i, $"{name} P{i}", s.Position, overall)).ToList(),
+            new[] { Position.GK, Position.CB, Position.LB, Position.DMF, Position.CMF, Position.RWF, Position.CF }
+                .Select((p, i) => MatchPlayer.FromOverall(startId + 100 + i, $"{name} B{i}", p, overall - 3)).ToList());
+
+    [Fact]
+    public void CornersSometimesProduceARealShotForTheAttackingSide()
+    {
+        // Before this fix, a Corner event was logged purely for stats and possession was always
+        // handed straight to the defending side — a corner was never actually a chance.
+        var shots = 0;
+        var corners = 0;
+        for (var seed = 0; seed < 60; seed++)
+        {
+            var rec = MatchSession.RunAutomatic(new MatchSetup(seed, MakeTeam("H", 1, 75, Formations.F442), MakeTeam("A", 1000, 75, Formations.F442)));
+            corners += rec.Events.Count(e => e.Kind == EventKind.Corner);
+            foreach (var corner in rec.Events.Where(e => e.Kind == EventKind.Corner))
+                if (rec.Events.Any(e => e.Kind == EventKind.Shot && e.CauseId == corner.Id)) shots++;
+        }
+        Assert.True(shots > 0);
+        Assert.True(shots < corners, "not every corner should become a shot — most get cleared");
+    }
+
+    [Fact]
+    public void DirectFreeKicksSometimesProduceARealShot()
+    {
+        var shots = 0;
+        for (var seed = 0; seed < 60; seed++)
+        {
+            var rec = MatchSession.RunAutomatic(new MatchSetup(seed, MakeTeam("H", 1, 75, Formations.F442), MakeTeam("A", 1000, 75, Formations.F442)));
+            foreach (var fk in rec.Events.Where(e => e.Kind == EventKind.FreeKick))
+                if (rec.Events.Any(e => e.Kind == EventKind.Shot && e.CauseId == fk.Id)) shots++;
+        }
+        Assert.True(shots > 0);
+    }
+
+    [Fact]
+    public void AFreeKickOrPenaltyShotsCauseIsTheRestartEventNotTheFoul()
+    {
+        // Regression: buildupCauseId must be the Penalty/FreeKick event's own id so the xG
+        // model's set-piece multiplier (AssistKindFor) actually applies, and a Goal's two-hop
+        // assist lookup has something to chain through.
+        var rec = MatchSession.RunAutomatic(new MatchSetup(1, MakeTeam("H", 1, 75, Formations.F442), MakeTeam("A", 1000, 75, Formations.F442)));
+        var byId = rec.Events.ToDictionary(e => e.Id);
+        var setPieceShots = rec.Events.Where(e => e.Kind == EventKind.Shot && byId.TryGetValue(e.CauseId, out var c)
+            && c.Kind is EventKind.FreeKick or EventKind.Penalty).ToList();
+        Assert.All(setPieceShots, s => Assert.NotEqual(EventKind.Foul, byId[s.CauseId].Kind));
+    }
+
+    [Fact]
+    public void EveryPenaltyStillProducesExactlyOneShotAttempt()
+    {
+        var totalPens = 0;
+        var pensWithShots = 0;
+        for (var seed = 0; seed < 40; seed++)
+        {
+            var rec = MatchSession.RunAutomatic(new MatchSetup(seed, MakeTeam("H", 1, 75, Formations.F442), MakeTeam("A", 1000, 75, Formations.F442)));
+            foreach (var pen in rec.Events.Where(e => e.Kind == EventKind.Penalty))
+            {
+                totalPens++;
+                if (rec.Events.Any(e => e.Kind == EventKind.Shot && e.CauseId == pen.Id)) pensWithShots++;
+            }
+        }
+        Assert.True(totalPens > 0);
+        Assert.Equal(totalPens, pensWithShots);
     }
 }
