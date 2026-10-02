@@ -125,6 +125,42 @@ Three more real issues, not just constants, surfaced while chasing the numbers a
   explicit off-ball movement model (overlaps, underlaps, rotations) beyond what the
   `PlayerInstruction` pull weights encode.
 
+## Phase 4: tactics depth (Auto-XI, Auto Instructions, instruction behavior)
+
+Added on top of the calibrated Phase 2/3 engine, in `AutoSelection.cs`, `AutoInstructions.cs`,
+and `InstructionProfiles.cs`:
+
+- **Auto-Assign Starting XI** (`AutoSelection.PickXi`): picks the best player per slot by
+  position fit, condition, fatigue and form — not just overall rating. Verified against the
+  spec's own example (an 84-rated exhausted midfielder loses his place to a fresh 79-rated
+  one) and that match importance shifts the balance (a dead rubber favors the better player
+  through fatigue; a cup final favors the fresher one).
+- **Auto Individual Instructions** (`AutoInstructions.Assign`): position-aware rules driven by
+  a player's own attributes and both teams' tactics — e.g. a fullback gets `AggressiveRuns`
+  under `VeryAttacking` mentality and `StayBack` under `VeryDefensive`; two strikers split
+  into `AttackChannel` (the quicker one) and `TargetMan`/`FalseNine` (the other) rather than
+  both playing the same role.
+- **20-value `PlayerInstruction` catalogue**, each mapped in `InstructionProfiles` to four
+  behavioral axes (forward pull, width, defensive press, shot willingness) plus a work-rate
+  multiplier — not a label with no effect. Verified to actually change behavior in-match:
+  `StayWide` vs `CutInside` wingers finish matches at measurably different average positions;
+  `TrackBack` wingers rack up more tackles/interceptions than `AttackSpace` wingers;
+  `AdvancedForward` strikers shoot more per touch than `TargetMan` strikers but get fewer
+  total touches — his higher forward pull isolates him from the buildup, a real trade-off the
+  numbers show clearly once touches and shots are measured separately.
+
+**Calibration safety:** every one of the four behavioral hooks resolves to the exact same
+number for `PlayerInstruction.Default` as the pre-Phase-4 code did (`InstructionProfiles.Get`
+is a true no-op for Default), and a regression test
+(`DefaultInstructionLeavesTheEngineNumericallyUnchangedFromThePreTacticsCalibration`) plus a
+full rerun of the Phase 2/3 calibration battery confirmed bit-for-bit identical results. None
+of the calibration numbers above changed because of this phase.
+
+**Not yet done:** opponent-tactics-aware adjustments are shallow (only `DefensiveMidfielder`
+and `Fullback` read the opponent's tactics at all); no explicit set-piece-specific instruction
+handling; CB and GK have no instruction axis yet, matching the spec's listed catalogue (it
+doesn't define one for those positions either).
+
 ## Running it yourself
 
 ```csharp

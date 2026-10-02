@@ -14,10 +14,24 @@ public enum Mentality { VeryDefensive, Defensive, Balanced, Attacking, VeryAttac
 public enum BuildUp { Short, Mixed, Direct }
 
 /// <summary>
-/// Individual instruction. Each one moves the player's target position or how far he leaves it,
-/// so it changes where he is when the ball arrives, not a number added to his rating.
+/// Individual instruction. Each one shifts where a player positions himself, how hard he works
+/// off the ball, how eager he is to shoot, and how much he presses when defending — never a flat
+/// number added to his rating. <see cref="InstructionProfiles"/> carries the actual deltas; the
+/// subset that makes football sense for a position is enforced by whoever assigns instructions
+/// (see <see cref="AutoInstructions"/>), not by this enum.
 /// </summary>
-public enum PlayerInstruction { Default, StayBack, Advance, StayWide, CutInside, Roam }
+public enum PlayerInstruction
+{
+    Default,
+    // Fullback
+    StayBack, Overlap, Underlap, Invert, AggressiveRuns,
+    // Winger
+    StayWide, CutInside, AttackSpace, TrackBack,
+    // Midfielder
+    HoldPosition, Roam, Advance, CoverCenter, PressAggressively,
+    // Striker
+    TargetMan, AdvancedForward, FalseNine, PressingForward, AttackChannel,
+}
 
 /// <summary>
 /// Team instructions, every value 0..1 unless it is an enum. Read on every tick, so a change

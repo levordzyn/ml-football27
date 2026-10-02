@@ -282,7 +282,8 @@ public sealed class MatchEngine
         if (nearby.Count == 0) return 20;
 
         var pressing = defending.Tactics.Pressing;
-        return nearby.Average(p => p.Effective(p.Player.Defending) * (0.7 + 0.6 * pressing));
+        return nearby.Average(p =>
+            (p.Effective(p.Player.Defending) + InstructionProfiles.Get(p.Instruction).PressBias) * (0.7 + 0.6 * pressing));
     }
 
     private static double PressResistance(PlayerMatchState actor) =>
@@ -349,7 +350,8 @@ public sealed class MatchEngine
         var wide = y < 0.22 || y > 0.78;
         var inBox = progress > 0.87 && Math.Abs(y - 0.5) < 0.25;
 
-        if (inBox && actor.Effective(actor.Player.Shooting) > 40 && _flow.Chance(0.17 + tactics.Risk * 0.14))
+        if (inBox && actor.Effective(actor.Player.Shooting) > 40
+            && _flow.Chance(0.17 + tactics.Risk * 0.14 + InstructionProfiles.Get(actor.Instruction).ShotBias))
             return Action.Shot;
 
         var weights = new (Action a, double w)[]
@@ -514,13 +516,14 @@ public sealed class MatchEngine
         foreach (var team in _state.Teams)
             foreach (var p in team.OnPitch.Where(p => p.OnPitch))
             {
-                var workRate = p.Instruction is PlayerInstruction.Advance or PlayerInstruction.Roam ? 1.15 : 1.0;
+                var profile = InstructionProfiles.Get(p.Instruction);
                 var pressLoad = 0.6 + team.Tactics.Pressing * 0.5;
                 var recovery = p.Effective(p.Player.Stamina) / 99.0;
-                p.Fatigue = Math.Clamp(p.Fatigue + elapsedMinutes * 0.0085 * workRate * pressLoad / recovery, 0, 1);
+                p.Fatigue = Math.Clamp(p.Fatigue + elapsedMinutes * 0.0085 * profile.WorkRateBias * pressLoad / recovery, 0, 1);
                 p.X += (RoleTargetX(team.Side, p) - p.X) * 0.10;
                 var currentAttackY = AttackFrameY(team.Side, p.Y);
-                var newAttackY = currentAttackY + (p.HomeSlot.Y - currentAttackY) * 0.05;
+                var widthTarget = Math.Clamp(p.HomeSlot.Y + profile.WidthBias, 0.02, 0.98);
+                var newAttackY = currentAttackY + (widthTarget - currentAttackY) * 0.05;
                 p.Y = AttackFrameY(team.Side, newAttackY); // self-inverse: attack-frame Y -> absolute Y
             }
     }
@@ -528,12 +531,7 @@ public sealed class MatchEngine
     private double RoleTargetX(Side side, PlayerMatchState p)
     {
         var ballProgress = AttackFrameX(side, _state.BallX);
-        var pull = p.Instruction switch
-        {
-            PlayerInstruction.StayBack => 0.15,
-            PlayerInstruction.Advance => 0.55,
-            _ => 0.35,
-        };
+        var pull = InstructionProfiles.Get(p.Instruction).XPull;
         var attackFrameHome = Math.Clamp(p.HomeSlot.X + (ballProgress - p.HomeSlot.X) * pull, 0.02, 0.98);
         return side == Side.Home ? attackFrameHome : 1.0 - attackFrameHome;
     }
