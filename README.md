@@ -1,170 +1,309 @@
-# eFootball Master League
+# MasterLeague eF27
 
-A companion app that restores a persistent Master League to eFootball 2027 (PC / Steam).
+You run the club. You manage the squad, tactics, transfers, board, staff, and youth development. The app handles the rest of the league in the background. You only play your own fixtures — either directly in eFootball or by entering the final score yourself.
 
-You run the club: squad, tactics, transfers, board, staff, youth. The app simulates the rest
-of the league and you play only *your* fixture, in eFootball if you want, or by entering the
-score. Transfers and player progression are written back into the game database, so the squads
-you manage are the squads you actually play with.
+The important part is that your career actually carries over into the game. Transfers, squad changes, and player development are written back to the game database, so the team you manage in the app is the same team you play with in eFootball.
 
-**The app's SQLite database is the single source of truth. The game's files are a render
-target.** Nothing reads game state back in as authority after the initial seed.
+**The SQLite database is the single source of truth. The game files are only a projection of that state.**
 
-> Early build. The management sim is solid; automatic capture from eFootball is experimental.
-> Keep modified game databases to **offline play**. Do not take an edited local database near
-> Dream Team or any online mode.
+After the initial world build, the app never treats the game files as authoritative. The career lives in the app database, and the game is updated from it when needed.
 
-## Status
+> Early build. The management simulation is stable, but automatic result capture from eFootball is still experimental.
+>
+> Modified game databases are intended for **offline play only**. Do not use an edited local database with Dream Team or any other online mode.
 
-| Phase | Scope | State |
-|---|---|---|
-| 0 | Writeback proven in-game | Passed 2026-08-19 ([docs/phase0-checklist.md](docs/phase0-checklist.md)) |
-| 1 | Data foundation (SQLite seed, real schemas) | Schemas recovered; seed tooling in `tools/` |
+## Current status
+
+| Phase | Scope | Status |
+| ----- | ------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| 0 | Prove that database changes can be written back into the game | Passed 2026-08-19 ([phase 0 checklist](docs/phase0-checklist.md)) |
+| 1 | Data foundation: SQLite seed and real game schemas | Schemas recovered; seed tools available in `tools/` |
 | 2 | League engine (`ML.Core`) | Built and tested |
-| 3 | Result capture from efootball-re's in-game stats host (`ML.Ingest`) | Built; pre-fills score, scorers, ratings and stats |
-| 4 | Writeback (`ML.Sync`, diff against applied state) | Core mechanism proven; diff model in progress |
-| 5 | Polish | Not started |
+| 3 | Match result capture (`ML.Ingest`) | Built; can pre-fill score, scorers, player ratings, and match statistics |
+| 4 | Writeback (`ML.Sync`) | Core writeback works; applied-state diffing is still being refined |
+| 5 | Polish and final refinement | Not started |
 
 ## Documentation
 
-| | |
-|---|---|
-| **[docs/GETTING-STARTED.md](docs/GETTING-STARTED.md)** | Install, build your world, take a job, play your first matchday. **Start here.** |
-| **[docs/FEATURES.md](docs/FEATURES.md)** | What the app does, at a glance |
-| **[docs/MANUAL.md](docs/MANUAL.md)** | The full manual: every screen, every setting, the rules the engine plays by, and troubleshooting |
-| [PLAYTESTING.md](PLAYTESTING.md) | What we'd like tested, and how to report it |
+The repository contains a large amount of technical documentation, so these are the best places to start:
 
-The full plan is in [efootball-master-league-plan.md](efootball-master-league-plan.md).
-Engineering rules and hard-won format knowledge live in [CLAUDE.md](CLAUDE.md).
+| Document | What it covers |
+| ------------------------------------------------------------------------------ | ---------------------------------------------------------- |
+| [**docs/phase0-checklist.md**](docs/phase0-checklist.md) | The original proof that the game-side writeback works |
+| [**docs/functional-spec.md**](docs/functional-spec.md) | Functional requirements and expected application behaviour |
+| [**docs/decisions.md**](docs/decisions.md) | Important engineering decisions and changes in approach |
+| [**docs/parity-matrix.md**](docs/parity-matrix.md) | Feature and implementation parity tracking |
+| [**docs/ux-brief.md**](docs/ux-brief.md) | UI/UX direction for the desktop application |
 
-## Layout
+The broader implementation plan is in [efootball-master-league-plan.md](efootball-master-league-plan.md).
 
-| Path | Role |
-|---|---|
-| `src/ML.Core` | League engine. Pure C#, no I/O, no package references, so it stays testable without the game |
-| `src/ML.Data` | SQLite + Dapper persistence |
-| `src/ML.Ingest` | Match exports from efootball-re's stats host: parser, folder watcher, PID linking to the fixture, player ratings (port of its `rating.py`) |
-| `src/ML.Sync` | Diff and writeback against the last applied state |
-| `src/ML.App` | Avalonia desktop app. **This is the app.** |
-| `src/ML.Web` | Older Blazor UI. Frozen and deprecated; do not record results there |
-| `tests/ML.Core.Tests` | Engine tests |
-| `tools/` | Python pipeline: world build, imports, format decoders, and the proven writeback (`ml_swap.py`, `ml_deploy.py`) |
-| `tools/vendor/sider/` | Vendored Sider file-format code (see below) |
-| `tools/vendor/efootball-player-tool/` | Vendored CPK reader/patcher from the eFootball Player Editor, used through `tools/cpk_patch.py` |
-| `tools/data/` | Decoded `dt270` gameplay schema and the named realism tunings and patches it drives |
-| `data/` | Hand-made identity rulings and adjudicated merges, re-applied on every world rebuild |
-| `docs/` | Format notes, decisions, specs, the exe gameplay map and the per-player stats runbook |
-| `samples/` | Schema notes derived from real exports. Real exports are not committed |
-| `assets/` | Competition and club artwork used by the app |
+Engineering rules, format knowledge, and repository-specific instructions are documented in [CLAUDE.md](CLAUDE.md).
+
+## Project structure
+
+| Path | Purpose |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/ML.Core` | The league simulation engine. Pure C#, with no I/O or package dependencies, so it can remain fully testable without eFootball installed |
+| `src/ML.Data` | SQLite persistence using Dapper |
+| `src/ML.Ingest` | Match-result ingestion from efootball-re's in-game stats host, including parsing, folder watching, fixture matching, and player-rating calculation |
+| `src/ML.Sync` | Compares desired state against the last applied state and prepares game writeback |
+| `src/ML.App` | The Avalonia desktop application. This is the main UI |
+| `src/ML.Web` | Legacy Blazor UI. Frozen and deprecated; do not use it to record results |
+| `tests/ML.Core.Tests` | Automated tests for the league engine |
+| `tools/` | Python tooling for world creation, imports, format handling, extraction, and the proven game writeback pipeline |
+| `tools/vendor/sider/` | Vendored Sider file-format and related game-format code |
+| `tools/vendor/efootball-player-tool/` | Vendored CPK reader/patcher used through `tools/cpk_patch.py` |
+| `tools/vendor/efootball-re/` | The in-game stats host used to export match data |
+| `tools/data/` | Decoded `dt270` gameplay data, realism settings, and related patches |
+| `data/` | Hand-maintained identity mappings, merges, and other data corrections applied during world creation |
+| `docs/` | Format research, technical notes, specifications, reverse-engineering findings, and implementation documentation |
+| `samples/` | Schema and sample data derived from real exports. Real game exports are not committed |
+| `assets/` | Competition, club, and other artwork used by the application |
 
 ## Download and play
 
-The [Releases page](https://github.com/tjgg260/eFootball-Master-League/releases) carries a
-zip with the built app and an embedded Python. Unzip it anywhere, double-click
-`Play Master League.bat`, and start a new career.
+The packaged builds are available from the [Releases page](https://github.com/levordzyn/ml-football27/releases).
 
-**No world ships with it.** The first New Career builds one out of your own eFootball install
-(`tools/first_run.py`): your clubs, leagues, players and squads from dt200, the club crests from
-the game's paks with installed mods such as EvoMod taking precedence, and the player photos from
-the game's own thumbnails. It takes about a minute, once, and it never writes to the game. A
-player without eFootball gets generated badges and avatars instead.
+The release package contains the built application and its embedded Python environment. Extract it anywhere, run:
 
-The world lands in `build/game_world.db` beside the app, and your careers live in it — so keep
-that file if you want to keep a save.
+```text
+Play Master League.bat
+```
 
-`tools/make_release.sh <version>` builds that package from a checkout.
+and create a new career.
+
+### Your world is built from your own eFootball installation
+
+A release does **not** ship with a pre-built world.
+
+When you start a new career, `tools/first_run.py` builds the world from your own eFootball installation. It imports things such as:
+
+- clubs and leagues
+- players and squads
+- game data from `dt200`
+- club crests from the installed game files
+- player thumbnails from the game
+
+Installed mods such as EvoMod can take precedence where appropriate.
+
+The first world build normally takes around a minute and does not modify the game installation.
+
+If eFootball is not installed, the app can still create a world using generated badges and player avatars.
+
+The generated world is stored in:
+
+```text
+build/game_world.db
+```
+
+Your careers live inside that database, so **keep the file if you want to keep your save**.
+
+A release package can be produced from a checkout with:
+
+```bash
+tools/make_release.sh <version>
+```
 
 ## Building and running
 
-Requirements:
+### Requirements
 
-- Windows 10/11
-- .NET 8 SDK (a newer SDK builds the `net8.0` targets fine)
-- To play a career by entering results yourself, nothing else is needed
+- Windows 10 or Windows 11
+- .NET 8 SDK
+- A newer .NET SDK is also fine as long as it can build the `net8.0` targets
+
+For a career where you simply enter match results yourself, nothing beyond the above is required.
+
+Build the solution with:
 
 ```bash
 dotnet build
+```
+
+Run the tests with:
+
+```bash
 dotnet test
 ```
 
-`Play Master League.bat` builds `ML.App` on first run and launches it from the repo root.
+The repository-root `Play Master League.bat` script builds `ML.App` on first launch and then starts the application.
 
-For the full eFootball integration you also need eFootball on Steam, and — **only if you run from
-a source checkout rather than the download** — Python 3.11+ with `Pillow`, `numpy` and
-`pycryptodome`. The release brings its own Python and the built stats host, so a downloader
-installs nothing. A Rust toolchain is needed only to rebuild that host from
-`tools/vendor/efootball-re/memprobe/host/`; the prebuilt `dxgi.dll` ships beside its source and
-Settings installs it for you. See [PLAYTESTING.md](PLAYTESTING.md) for the step-by-step setup.
+### Full eFootball integration
 
-## What you must supply yourself
+For the complete eFootball integration you also need:
 
-These are used by the tools but are **not in this repository**. They are third-party or
-game data and are not ours to redistribute. Each location is gitignored, so dropping them in
-place will not dirty your checkout.
+- eFootball on Steam
+- Python 3.11+ when running directly from a source checkout
+- `Pillow`
+- `numpy`
+- `pycryptodome`
 
-| Item | Where it goes | Used by |
-|---|---|---|
-| eFootball install (Steam appid 1665460) | Wherever Steam put it | Everything in Phase 3 and 4 |
-| EvoMod | Installed into the game as its author documents | The install order rule below |
-| Stats host **rebuild** (Rust toolchain) — optional | The built `dxgi.dll` is committed at `tools/vendor/efootball-re/bin/` and ships in the release; Settings → Install stats host puts it in the game. Rebuild only to change it: `bash tools/vendor/efootball-re/memprobe/deploy_host.sh` | Result capture (Dashboard pre-fill, Settings → Match data) |
-| Your own game exports, FM exports, face packs | Repo root or `samples/` | The `tools/` import pipeline |
+The packaged release already includes its own Python environment and the built stats host, so normal users do not need to install those dependencies separately.
 
-No CPK tooling has to be supplied. The tools read and patch eFootball's `.cpk` archives directly
-through the eFootball Player Editor's
-container code, vendored in `tools/vendor/efootball-player-tool/`. CRI File System Tools
-(`cpkmakec.exe`), the eFootball WESYS Unzlib Tool and `cricodecs` are no longer used. To pull the
-game tables out of dt200 into a tree:
+A Rust toolchain is only required if you intend to rebuild the stats host itself from:
+
+```text
+tools/vendor/efootball-re/memprobe/host/
+```
+
+The prebuilt `dxgi.dll` is already included in the repository and release package, and the application can install it through the Settings screen.
+
+## External files and data you must provide
+
+Some inputs are intentionally not included in the repository because they are third-party software or game data that cannot be redistributed here.
+
+Their locations are gitignored, so adding them locally will not modify your Git working tree.
+
+| Item | Location | Used for |
+| ------------------------------------------------- | --------------------------------------------- | -------------------------------------------------- |
+| eFootball installation (Steam App ID `1665460`) | Your normal Steam installation directory | Phases 3 and 4, plus game integration |
+| EvoMod | Install it according to its own documentation | Game content and installation order |
+| Stats host rebuild toolchain | Optional; the built host is already supplied | Rebuilding the stats host if you want to modify it |
+| Your own game exports, FM exports, and face packs | Repository root or `samples/` | Import and world-building tools |
+
+### CPK handling
+
+You do **not** need to install separate CPK utilities.
+
+The project reads and patches eFootball `.cpk` archives through the vendored CPK/container code in:
+
+```text
+tools/vendor/efootball-player-tool/
+```
+
+Older tooling based on `cpkmakec.exe`, the eFootball WESYS Unzlib Tool, and `cricodecs` is no longer required.
+
+To extract the game tables from `dt200` into a normal directory tree:
 
 ```bash
 python tools/cpk_patch.py extract "<eFootball>/cpk/dt200_console_all.cpk" bins
 ```
 
-The Player Editor itself is optional. Use it to edit players by hand, or to export CSVs from it.
+The eFootball Player Editor itself is optional. It can still be useful for manually editing players or exporting CSV data.
 
-## Playing offline
+## Offline play
 
-The game must be offline for a modified database to be safe. The "offline exe" used for
-Master League play is your own `eFootball.exe` with two bytes changed: the matchmaking host
-`pes22-game.cs.konami.net` becomes `pes99-game.cs.konami.net`, so the client cannot reach
-Konami and starts straight into offline play. Gameplay code is untouched. We do not
-redistribute the executable; apply the change to your own copy, with the game closed:
+A modified game database should only be used while the game is offline.
+
+The project's offline setup uses your own `eFootball.exe` with a two-byte change that prevents the client from connecting to Konami's matchmaking host.
+
+Specifically, the host string:
+
+```text
+pes22-game.cs.konami.net
+```
+
+is changed to:
+
+```text
+pes99-game.cs.konami.net
+```
+
+This prevents the client from reaching Konami and makes it start directly in offline mode.
+
+No gameplay code is changed by this patch.
+
+The modified executable is not redistributed. You patch your own copy locally while the game is closed:
 
 ```bash
 python tools/exe_patch.py apply tools/data/patches/offline-no-gameplay-change.json
 ```
 
-`python tools/exe_patch.py remove <same spec>` reverses it, and so does Steam's "verify
-integrity of game files". The first apply keeps a byte-exact pristine backup.
+To remove the patch:
+
+```bash
+python tools/exe_patch.py remove <same spec>
+```
+
+Steam's **Verify integrity of game files** will also restore the original executable.
+
+The first time the patch is applied, the tool keeps a byte-exact backup of the original executable.
 
 ## Operational rules
 
-- Install order after any Konami update: **Konami patch, then EvoMod, then your CSV.** Always.
-- Back up `Player.bin` before every apply. The tools take their own backup every time.
-- No write happens without a byte-exact round-trip proof first. If the tools cannot rebuild
-  the unmodified source file byte for byte, nothing is written. That failure is by design.
-- `PlayerAssignment.bin` is a positional format. A transfer swaps which player occupies a
-  record; it never moves a record or edits `TeamID`.
-- Never rebuild or re-serialise the CPK. A deploy patches only the files that changed: in place
-  when they fit, otherwise moved with only their TOC row rewritten. Every other byte of the
-  archive is verified identical before anything is written.
+These rules are important because the game files are treated as a deployment target, not as the career database.
+
+### Installation order
+
+After every Konami update, use this order:
+
+**Konami update → EvoMod → your CSV / database changes**
+
+Do not change the order.
+
+### Always back up before applying
+
+Back up `Player.bin` before every writeback.
+
+The tooling creates its own backup as well, but maintaining your own copy gives you an additional recovery path.
+
+### Never write without a round-trip check
+
+The tools do not write modified data unless they can first prove that the source format can be rebuilt byte-for-byte when left unchanged.
+
+If an unmodified file cannot survive that round-trip check exactly, the write operation is stopped.
+
+That failure is intentional.
+
+### `PlayerAssignment.bin` is positional
+
+`PlayerAssignment.bin` is not a normal table where `TeamID` can simply be edited.
+
+For transfers, the implementation swaps which player occupies a record. It does **not** move records around or directly rewrite the `TeamID` field.
+
+### Never rebuild the entire CPK
+
+The deployment process patches only the files that actually changed.
+
+If the modified file still fits in its existing location, it is patched in place. Otherwise, the file can be relocated and only the required TOC entry is updated.
+
+The rest of the archive is checked byte-for-byte so unrelated data remains untouched.
+
+## Core design principle
+
+The most important architectural decision in the project is simple:
+
+**SQLite is the career. The game is the projection.**
+
+The app owns the state of:
+
+- clubs
+- squads
+- transfers
+- contracts
+- budgets
+- fixtures
+- results
+- player development
+- season history
+- and everything else that makes up the career
+
+The game only receives the state required to make the next match playable.
+
+This distinction matters because eFootball can update, replace, or reorganize its own files. Mods can also replace game archives. Those changes should not destroy the career itself.
+
+The career therefore remains in SQLite and can be reapplied to a fresh game installation when necessary.
 
 ## Licence
 
-GPL-3.0. See [LICENSE](LICENSE).
+This project is licensed under **GPL-3.0**. See [LICENSE](LICENSE).
 
-This is deliberate: `tools/vendor/sider/` carries file-format and WESYS cipher code from
-[Efootball-Sider](https://github.com/Master-Antonio/Efootball-Sider) (GPL-3.0), and
-`tools/ml_apply.py` links against it, which makes this project a derivative work. Details in
-[tools/vendor/sider/VENDOR.md](tools/vendor/sider/VENDOR.md). Do not add code under an
-incompatible licence.
+The license choice is intentional.
 
-`tools/vendor/efootball-player-tool/` is the eFootball Player Editor's CPK and IoStore code,
-included here under GPL-3.0 by its author. Details in
-[tools/vendor/efootball-player-tool/VENDOR.md](tools/vendor/efootball-player-tool/VENDOR.md).
+`tools/vendor/sider/` contains file-format and WESYS-related code from [Efootball-Sider](https://github.com/Master-Antonio/Efootball-Sider), which is GPL-3.0. `tools/ml_apply.py` links against that code, so the project is treated as a derivative work.
 
-`tools/vendor/efootball-re/` is the in-game stats host that writes the match exports. It is built
-on `rust_sider` from Efootball-Sider (GPL-3.0). Details and install steps in
-[tools/vendor/efootball-re/VENDOR.md](tools/vendor/efootball-re/VENDOR.md).
+See [tools/vendor/sider/VENDOR.md](tools/vendor/sider/VENDOR.md) for the relevant details.
 
-Sider's `dxgi.dll` runtime is not redistributed here. eFootball is a Konami product; this
-project is not affiliated with or endorsed by Konami.
+The same applies to the vendored eFootball Player Editor container code:
+
+[tools/vendor/efootball-player-tool/VENDOR.md](tools/vendor/efootball-player-tool/VENDOR.md)
+
+and the efootball-re stats host:
+
+[tools/vendor/efootball-re/VENDOR.md](tools/vendor/efootball-re/VENDOR.md)
+
+Do not add code or dependencies under a license that is incompatible with the project's GPL-3.0 requirements.
+
+The Sider `dxgi.dll` runtime itself is not redistributed here.
+
+eFootball is a Konami product. This project is independent and is not affiliated with, sponsored by, or endorsed by Konami.
