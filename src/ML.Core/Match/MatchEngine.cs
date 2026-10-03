@@ -62,8 +62,13 @@ public sealed class MatchEngine
                 X = abs.x,
                 Y = abs.y,
                 Fatigue = player.StartFatigue,
-                Instruction = sheet.Instructions is not null && sheet.Instructions.TryGetValue(player.Id, out var ins)
-                    ? ins : PlayerInstruction.Default,
+                // A keeper with no explicit instruction is not just an outfielder on neutral
+                // settings — Default's pull (0.35) would drift him toward the centre circle as
+                // the ball advances. His effective default is HoldLine; SweeperKeeper has to be
+                // set explicitly.
+                Instruction = sheet.Instructions is not null && sheet.Instructions.TryGetValue(player.Id, out var ins) ? ins
+                    : player.Position.IsGoalkeeper() ? PlayerInstruction.HoldLine
+                    : PlayerInstruction.Default,
             });
         }
 
@@ -307,7 +312,10 @@ public sealed class MatchEngine
             _foulsThisHalf++;
             MaybeCard(defender, defending.Side, denyingCleanChance: progress > 0.80);
 
-            var isPenalty = progress > 0.85 && Math.Abs(_spellY - 0.5) < 0.28;
+            // Being in the box is necessary but not sufficient — most fouls there are still given
+            // as ordinary fouls, not penalties. Real football awards a penalty for roughly one in
+            // eight fouls that happen inside the box.
+            var isPenalty = progress > 0.85 && Math.Abs(_spellY - 0.5) < 0.28 && _flow.Chance(0.12);
             var restartId = Log(isPenalty ? EventKind.Penalty : EventKind.FreeKick, _spellSide, _spellSide,
                 actor.Player.Id, 0, actor.X, actor.Y, causeId: evId);
 
@@ -509,7 +517,7 @@ public sealed class MatchEngine
         else if ((result == ShotResult.OffTarget && _flow.Chance(0.4)) || (result == ShotResult.Blocked && _flow.Chance(0.5)))
         {
             var cornerId = Log(EventKind.Corner, shooter.Side, defending.Side, 0, 0, causeId: shotId);
-            TakeCorner(attacking, defending, cornerId);
+            TakeCorner(attacking, defending, cornerId, AttackFrameY(shooter.Side, shooter.Y));
             return;
         }
 
@@ -522,22 +530,55 @@ public sealed class MatchEngine
     /// cleared before anyone gets a real sight of goal, but when it isn't, the best aerial
     /// presence available gets a header at it.
     /// </summary>
-    private void TakeCorner(TeamMatchState attacking, TeamMatchState defending, int causeId)
+    /// <summary>Best player on the pitch by <paramref name="score"/>, unless the team has a
+    /// standing taker (<paramref name="designatedId"/>) who's currently on the pitch — a real
+    /// squad has a settled routine, not a fresh pick for every set piece.</summary>
+    private static PlayerMatchState PickTaker(TeamMatchState team, long? designatedId, Func<PlayerMatchState, double> score)
     {
-        var deliverer = attacking.OnPitch.Where(p => p.OnPitch && !p.Player.Position.IsGoalkeeper())
-            .OrderByDescending(p => p.Effective(p.Player.Passing)).First();
-        if (!_flow.Chance(0.60 + deliverer.Effective(deliverer.Player.Passing) / 500.0))
+        if (designatedId is { } id)
         {
-            // Cleared before it ever became a real chance.
+            var designated = team.Find(id);
+            if (designated is { OnPitch: true }) return designated;
+        }
+        return team.OnPitch.Where(p => p.OnPitch && !p.Player.Position.IsGoalkeeper())
+            .OrderByDescending(score).First();
+    }
+
+    private void TakeCorner(TeamMatchState attacking, TeamMatchState defending, int causeId, double awardedAtY)
+    {
+        var deliverer = PickTaker(attacking, attacking.Sheet.CornerTakerId, p => p.Effective(p.Player.Passing));
+
+        // A team that builds patiently is more likely to work it short than hang an aerial ball
+        // into a crowd — that doesn't fit how they want to play.
+        if (attacking.Tactics.BuildUp == BuildUp.Short && _flow.Chance(0.25))
+        {
+            StartSpell(attacking.Side, AttackFrameX(attacking.Side, 0.90), AttackFrameY(attacking.Side, awardedAtY), causeId);
+            return;
+        }
+
+        if (!_flow.Chance(0.16 + deliverer.Effective(deliverer.Player.Passing) / 750.0))
+        {
+            // Cleared before it ever became a real chance — most corners end exactly like this.
             StartSpell(defending.Side, defending.Side == Side.Home ? 0.06 : 0.94, 0.5, causeId);
             return;
         }
 
-        var target = attacking.OnPitch.Where(p => p.OnPitch && !p.Player.Position.IsGoalkeeper())
-            .OrderByDescending(p => p.Effective(p.Player.Physical)).First();
-        var attackFrameTarget = AttackFrameX(attacking.Side, 0.95);
-        target.X = attackFrameTarget;
-        target.Y = AttackFrameY(attacking.Side, 0.5 + (_flow.NextDouble() - 0.5) * 0.3);
+        // Near post arrives quicker and is marginally harder to defend cleanly; far post gives
+        // the defence longer to react but draws more bodies up for a flick-on. The corner's own
+        // side decides which goalpost is "near".
+        var cornerFromLeft = awardedAtY < 0.5;
+        var nearPost = _flow.Chance(0.5);
+        var targetAttackY = nearPost ? (cornerFromLeft ? 0.40 : 0.60) : (cornerFromLeft ? 0.62 : 0.38);
+
+        // A quick near-post run rewards being first to react; a far-post ball is won in the air.
+        var target = nearPost
+            ? attacking.OnPitch.Where(p => p.OnPitch && !p.Player.Position.IsGoalkeeper())
+                .OrderByDescending(p => p.Effective(p.Player.Pace) + p.Effective(p.Player.Physical)).First()
+            : attacking.OnPitch.Where(p => p.OnPitch && !p.Player.Position.IsGoalkeeper())
+                .OrderByDescending(p => p.Effective(p.Player.Physical)).First();
+
+        target.X = AttackFrameX(attacking.Side, 0.95);
+        target.Y = AttackFrameY(attacking.Side, targetAttackY);
 
         // A packed box, not a precisely tracked one — three defenders between ball and goal is a
         // reasonable stand-in for how crowded a defended corner actually is.
@@ -552,16 +593,15 @@ public sealed class MatchEngine
     /// </summary>
     private void TakeFreeKick(TeamMatchState attacking, TeamMatchState defending, double x, double y, double progress, int causeId)
     {
-        var inRange = progress > 0.68 && Math.Abs(AttackFrameY(attacking.Side, y) - 0.5) < 0.35;
-        if (!inRange || !_flow.Chance(0.35))
+        var inRange = progress > 0.74 && Math.Abs(AttackFrameY(attacking.Side, y) - 0.5) < 0.35;
+        if (!inRange || !_flow.Chance(0.12))
         {
             StartSpell(attacking.Side, x, y, causeId);
             return;
         }
 
-        var taker = attacking.OnPitch.Where(p => p.OnPitch && !p.Player.Position.IsGoalkeeper())
-            .OrderByDescending(p => p.Effective(p.Player.Shooting) * 0.6 + p.Effective(p.Player.Passing) * 0.4)
-            .First();
+        var taker = PickTaker(attacking, attacking.Sheet.FreeKickTakerId,
+            p => p.Effective(p.Player.Shooting) * 0.6 + p.Effective(p.Player.Passing) * 0.4);
         taker.X = x;
         taker.Y = y;
 

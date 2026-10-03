@@ -56,4 +56,20 @@ public static class AutoSelection
 
         return positionFit + p.RoleRating + formBonus - fatiguePenalty;
     }
+
+    /// <summary>
+    /// Picks a standing corner-kick and free-kick taker from the XI, by the same attribute
+    /// blend the engine falls back to when no one is designated — the best passer for corners,
+    /// the best shooting/passing blend for direct free kicks. A real team settles on these once
+    /// rather than picking fresh for every set piece; this gives a caller that starting point.
+    /// </summary>
+    public static (long CornerTakerId, long FreeKickTakerId) PickSetPieceTakers(IReadOnlyList<MatchPlayer> starters)
+    {
+        var outfielders = starters.Where(p => !p.Position.IsGoalkeeper()).ToList();
+        if (outfielders.Count == 0) throw new ArgumentException("No outfielders to pick a set-piece taker from.");
+
+        var cornerTaker = outfielders.OrderByDescending(p => p.Passing).First();
+        var freeKickTaker = outfielders.OrderByDescending(p => p.Shooting * 0.6 + p.Passing * 0.4).First();
+        return (cornerTaker.Id, freeKickTaker.Id);
+    }
 }

@@ -31,6 +31,10 @@ public enum PlayerInstruction
     HoldPosition, Roam, Advance, CoverCenter, PressAggressively,
     // Striker
     TargetMan, AdvancedForward, FalseNine, PressingForward, AttackChannel,
+    // Centre-back
+    Sweep, StepUp,
+    // Goalkeeper
+    HoldLine, SweeperKeeper,
 }
 
 /// <summary>
@@ -152,11 +156,18 @@ public sealed record MatchPlayer(
     };
 }
 
+/// <param name="CornerTakerId">The squad's standing corner-kick taker. When he's on the pitch,
+/// he takes every corner rather than whoever happens to be the best passer at that moment — a
+/// real team has a settled routine, not a fresh pick every time. Falls back to the best
+/// available passer if he's subbed off, injured, or sent off, or if this is left unset.</param>
+/// <param name="FreeKickTakerId">Same idea for direct free kicks, falling back to the best
+/// shooting/passing blend available when he's unset or off the pitch.</param>
 public sealed record TeamSheet(
     string Name, Formation Formation, MatchTactics Tactics,
     IReadOnlyList<MatchPlayer> Starters, IReadOnlyList<MatchPlayer> Bench,
     IReadOnlyDictionary<long, PlayerInstruction>? Instructions = null,
-    bool HumanControlled = false, double ManagerDecisiveness = 0.85)
+    bool HumanControlled = false, double ManagerDecisiveness = 0.85,
+    long? CornerTakerId = null, long? FreeKickTakerId = null)
 {
     public void Validate()
     {

@@ -124,6 +124,24 @@ public class AutoInstructionsTests
     }
 
     [Fact]
+    public void VeryDefensiveMentalityGivesTheCentreBackSweepNotDefault()
+    {
+        var starters = StartersFor(Formations.F442);
+        var ins = AutoInstructions.Assign(starters, Formations.F442, new MatchTactics { Mentality = Mentality.VeryDefensive }, new MatchTactics());
+        Assert.Equal(PlayerInstruction.Sweep, ins[IdAt(Formations.F442, starters, Position.CB)]);
+    }
+
+    [Fact]
+    public void HighDefensiveLineGivesAGoodPassingGoalkeeperSweeperKeeper()
+    {
+        var starters = StartersFor(Formations.F442);
+        var gkIdx = Formations.F442.Slots.ToList().FindIndex(s => s.Position == Position.GK);
+        starters[gkIdx] = starters[gkIdx] with { Passing = 60 };
+        var ins = AutoInstructions.Assign(starters, Formations.F442, new MatchTactics { DefensiveLine = 0.75 }, new MatchTactics());
+        Assert.Equal(PlayerInstruction.SweeperKeeper, ins[starters[gkIdx].Id]);
+    }
+
+    [Fact]
     public void NeverAssignsAWingerInstructionToAFullback()
     {
         // Each position only ever gets instructions from its own catalogue (Section 8's intent):
@@ -284,6 +302,80 @@ public class SetPieceTests
         var setPieceShots = rec.Events.Where(e => e.Kind == EventKind.Shot && byId.TryGetValue(e.CauseId, out var c)
             && c.Kind is EventKind.FreeKick or EventKind.Penalty).ToList();
         Assert.All(setPieceShots, s => Assert.NotEqual(EventKind.Foul, byId[s.CauseId].Kind));
+    }
+
+    [Fact]
+    public void CornerDeliveriesVaryBetweenNearAndFarPostRatherThanOneFixedPoint()
+    {
+        var ys = new List<double>();
+        for (var seed = 0; seed < 80; seed++)
+        {
+            var rec = MatchSession.RunAutomatic(new MatchSetup(seed, MakeTeam("H", 1, 75, Formations.F442), MakeTeam("A", 1000, 75, Formations.F442)));
+            var byId = rec.Events.ToDictionary(e => e.Id);
+            foreach (var shot in rec.Events.Where(e => e.Kind == EventKind.Shot))
+                if (byId.TryGetValue(shot.CauseId, out var c) && c.Kind == EventKind.Corner)
+                    ys.Add(shot.Y);
+        }
+        Assert.True(ys.Count > 20);
+        Assert.True(ys.Select(y => Math.Round(y, 1)).Distinct().Count() >= 2, "deliveries should land at more than one spot");
+    }
+
+    [Fact]
+    public void ADesignatedCornerTakerIsActuallyUsedInsteadOfWhoeverIsBestThatMoment()
+    {
+        List<MatchPlayer> Bench(int startId, int overall) =>
+            new[] { Position.GK, Position.CB, Position.LB, Position.DMF, Position.CMF, Position.RWF, Position.CF }
+                .Select((p, i) => MatchPlayer.FromOverall(startId + 100 + i, $"B{i}", p, overall)).ToList();
+
+        var away = new TeamSheet("A", Formations.F442, new MatchTactics(),
+            Formations.F442.Slots.Select((s, i) => MatchPlayer.FromOverall(1000 + i, $"A P{i}", s.Position, 75)).ToList(), Bench(1000, 72));
+
+        var starters = Formations.F442.Slots.Select((s, i) => MatchPlayer.FromOverall(1 + i, $"H P{i}", s.Position, 75)).ToList();
+        var cmfIdx = Formations.F442.Slots.ToList().FindIndex(s => s.Position == Position.CMF);
+        starters[cmfIdx] = starters[cmfIdx] with { Passing = 95 };   // a standout passer, freely pickable
+        var worstPasser = starters.Where(p => !p.Position.IsGoalkeeper()).OrderBy(p => p.Passing).First();
+
+        var freePick = new TeamSheet("H", Formations.F442, new MatchTactics(), starters, Bench(1, 70));
+        var forcedWeak = freePick with { CornerTakerId = worstPasser.Id };
+
+        (int shots, int corners) CornerOutcome(TeamSheet home)
+        {
+            int shots = 0, corners = 0;
+            for (var seed = 0; seed < 150; seed++)
+            {
+                var rec = MatchSession.RunAutomatic(new MatchSetup(seed, home, away));
+                corners += rec.Events.Count(e => e.Kind == EventKind.Corner && e.Side == Side.Home);
+                foreach (var corner in rec.Events.Where(e => e.Kind == EventKind.Corner && e.Side == Side.Home))
+                    if (rec.Events.Any(e => e.Kind == EventKind.Shot && e.CauseId == corner.Id)) shots++;
+            }
+            return (shots, corners);
+        }
+
+        var free = CornerOutcome(freePick);
+        var forced = CornerOutcome(forcedWeak);
+
+        // A measurably worse designated taker should convert fewer corners into shots than
+        // letting the engine freely pick the best passer available — proof the designation is
+        // actually honoured, not just accepted and ignored.
+        Assert.True((double)forced.shots / forced.corners < (double)free.shots / free.corners);
+    }
+
+    [Fact]
+    public void GoalkeeperWithNoExplicitInstructionStaysNearHisOwnGoal()
+    {
+        // Regression: Default's shared pull (0.35) used to apply to goalkeepers too, drifting
+        // them toward the centre circle (observed average ~0.22, max ~0.32 of the pitch length
+        // from his own goal). A keeper with nothing set now effectively plays HoldLine.
+        var home = MakeTeam("H", 1, 75, Formations.F442);
+        var away = MakeTeam("A", 1000, 75, Formations.F442);
+        var engine = new MatchEngine(new MatchSetup(1, home, away));
+        var maxX = 0.0;
+        for (var minute = 0; minute < 90; minute += 5)
+        {
+            engine.AdvanceTo(minute * 60);
+            maxX = Math.Max(maxX, engine.State.Of(Side.Home).Goalkeeper.X);
+        }
+        Assert.True(maxX < 0.15);
     }
 
     [Fact]

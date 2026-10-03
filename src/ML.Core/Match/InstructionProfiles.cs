@@ -57,6 +57,16 @@ public static class InstructionProfiles
         PlayerInstruction.PressingForward => new(0.44, 0, +6, +0.01, 1.15),
         PlayerInstruction.AttackChannel => new(0.50, +0.10, -1, +0.02, 1.15),
 
+        // Centre-back: how far he steps out of the back line.
+        PlayerInstruction.Sweep => new(0.20, 0, +3, 0, 0.95),
+        PlayerInstruction.StepUp => new(0.34, 0, +5, 0, 1.10),
+
+        // Goalkeeper: how far off his line. HoldLine is deliberately far lower than Neutral's
+        // 0.35 — a keeper is not an outfield player, and should not drift toward the centre
+        // circle as the ball does.
+        PlayerInstruction.HoldLine => new(0.06, 0, 0, 0, 0.90),
+        PlayerInstruction.SweeperKeeper => new(0.16, 0, +2, 0, 0.95),
+
         _ => Neutral,
     };
 }

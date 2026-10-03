@@ -193,6 +193,53 @@ of the calibration numbers above changed because of this phase.
   no designated/persistent set-piece taker (picked fresh by attribute each time rather than a
   saved role); CB and GK still have no instruction axis, matching the spec's own catalogue.
 
+## Shot-volume calibration and the three remaining limitations — resolved
+
+**Found a real bug while measuring shot volume by source, not just the total.** Breaking
+shots/team (19.0 at the time) down by what caused them: open play 12.47 (already close to real
+football's 12–14), corners 3.89, free kicks 1.32, **penalties 1.31**. A real team gets a
+penalty roughly once every 5–8 matches (~0.1–0.15 per team per match) — the engine was handing
+out **penalties 10× too often**, because the box zone that makes a foul a penalty was never
+gated by anything beyond "a foul happened to land there." Fixed with an explicit 12% gate
+(matching the real rough ratio of in-box fouls that are actually given as penalties) on top of
+the zone check — penalties dropped to ~0.15/team/match. Corner and free-kick shot-conversion
+rates also came down (most corners get cleared before a real chance in real football; most fouls
+in range still don't go direct). Total landed at **shots/team 14.2–14.8, right in the 12–14
+range**, goals/match 2.6–2.7 after a small compensating xG nudge to recover what the set-piece
+trim removed.
+
+1. **Corner delivery depth.** `TakeCorner` now varies by near-post vs far-post (whichever
+   goalpost is closer to the flag the corner was actually won from, derived from the missed
+   shot's own position) and occasionally works it short instead (more likely for a team whose
+   `BuildUp` is `Short`, since an aerial ball into a crowd doesn't fit how they play). Near-post
+   targets the quickest, most physical player available (first to react); far-post targets pure
+   aerial presence. Verified the delivery Y position actually clusters at multiple distinct
+   points across many corners, not one fixed spot.
+2. **Permanent set-piece taker.** `TeamSheet` gained `CornerTakerId`/`FreeKickTakerId`. When set
+   and the player is still on the pitch, he takes every one — a real squad has a settled
+   routine, not a fresh pick each time — falling back to the best available by attribute if he's
+   off (subbed, injured, sent off) or unset. `AutoSelection.PickSetPieceTakers` gives a sensible
+   starting pick. Verified with a real comparative test, not just that it compiles: forcing a
+   deliberately weak designated taker measurably *lowers* the corner-to-shot conversion rate
+   compared to letting the engine pick freely (0.244 vs 0.290 across 150 matches each).
+3. **CB and GK instructions.** Added `Sweep`/`StepUp` for centre-backs (cautious/covering vs.
+   stepping into midfield to win it back) and `HoldLine`/`SweeperKeeper` for goalkeepers (on his
+   line vs. covering space behind a high defensive line), each with real `InstructionProfiles`
+   entries, assigned by `AutoInstructions` from a player's own attributes and both teams'
+   tactics, same discipline as every other position.
+
+**A second real bug surfaced building the GK instruction, not invented to pad this out:** a
+goalkeeper with no explicit instruction was inheriting the shared `Default` profile's pull
+(0.35) — the same as any outfielder. Measured directly: he was drifting to an average absolute
+position 0.22 of the pitch length from his own goal, with a peak of 0.32 (roughly 23m and 34m on
+a 105m pitch) — nowhere close to real goalkeeper behavior. Fixed by making a keeper's effective
+default `HoldLine` (pull 0.06) instead of the shared neutral profile; `SweeperKeeper` has to be
+set explicitly. Re-measured after the fix: average 0.072, peak 0.090 (about 7.5m and 9.5m) —
+within normal goalkeeping range. This is a genuine behavior change from every prior calibration
+pass (goalkeepers in Phase 2/3 through the previous set-piece pass were all drifting too far
+forward), re-verified against the full regression battery afterward with no other numbers moving
+outside their established ranges.
+
 ## Running it yourself
 
 ```csharp

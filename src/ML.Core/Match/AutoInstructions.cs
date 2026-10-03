@@ -36,7 +36,9 @@ public static class AutoInstructions
                 Position.CMF => CentralMidfielder(player, own, opponent),
                 Position.AMF => AttackingMidfielder(player, own, opponent),
                 Position.CF or Position.SS => Striker(player, own, opponent, strikerSlots),
-                _ => PlayerInstruction.Default,   // GK, CB: no instruction axis modelled yet
+                Position.CB => CentreBack(player, own, opponent),
+                Position.GK => Goalkeeper(player, own),
+                _ => PlayerInstruction.Default,
             };
         }
         return result;
@@ -150,5 +152,25 @@ public static class AutoInstructions
         if (own.Mentality is Mentality.Attacking or Mentality.VeryAttacking && p.Pace > 70) return PlayerInstruction.AdvancedForward;
         if (pressBack) return PlayerInstruction.PressingForward;
         return PlayerInstruction.Default;
+    }
+
+    private static PlayerInstruction CentreBack(MatchPlayer p, MatchTactics own, MatchTactics opponent)
+    {
+        // Aggressive, ball-winning centre-backs step into midfield to win it back high; a team
+        // sitting deep or facing one throwing men forward wants its centre-backs disciplined and
+        // deep instead, not stepping out of the line to chase the game.
+        if (own.Mentality is Mentality.VeryDefensive or Mentality.Defensive) return PlayerInstruction.Sweep;
+        if (opponent.Mentality is Mentality.Attacking or Mentality.VeryAttacking) return PlayerInstruction.Sweep;
+        if (p.Defending - p.Passing > 8 && p.Physical > 65) return PlayerInstruction.StepUp;
+        return PlayerInstruction.Default;
+    }
+
+    private static PlayerInstruction Goalkeeper(MatchPlayer p, MatchTactics own)
+    {
+        // A high defensive line needs a keeper willing to come off his line and cover the space
+        // behind it — without that cover a high line just invites a clean run in on goal. A team
+        // sitting deep keeps its keeper on his line, where a deep block leaves him anyway.
+        if (own.DefensiveLine > 0.6 && p.Passing > 45) return PlayerInstruction.SweeperKeeper;
+        return PlayerInstruction.HoldLine;
     }
 }
